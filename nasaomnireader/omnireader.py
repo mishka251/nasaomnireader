@@ -6,6 +6,12 @@ import matplotlib as mpl
 import matplotlib.pyplot as pp
 import scipy.interpolate as interpolate
 
+import logging
+
+from requests import ReadTimeout
+
+log = logging.getLogger(__name__)
+
 #Attempt to pull in spacepy to get pycdf interface
 #to use faster CDFs
 try:
@@ -286,8 +292,9 @@ class omni_downloader(object):
         remotefn = self.ftpdir+'/'+self.cadence_subdir[cadence]+'/'+self.filename_gen[cadence](dt)
         remote_path,fn = '/'.join(remotefn.split('/')[:-1]),remotefn.split('/')[-1]
         localfn = os.path.join(self.localdir,fn)
+        log.debug(f"omnireader.py:292, localfn={localfn}, remote={remote_path}")
         if not os.path.exists(localfn) or self.force_download:
-
+            log.debug(f"omnireader.py:294")
             # ftp = ftplib.FTP_TLS(self.ftpserv)
             # print('Connecting to OMNIWeb FTP server %s' % (self.ftpserv))
             # ftp.connect()
@@ -303,9 +310,17 @@ class omni_downloader(object):
             # ftp.quit()
 
             url = 'https://'+self.ftpserv+remotefn
-            print(url)
+            log.debug(url)
 
-            head = requests.head(url,allow_redirects=True)
+            head_timeout = 0.75
+
+            try:
+                head = requests.head(url,allow_redirects=True, timeout=head_timeout)
+            except ReadTimeout as e:
+                msg = f"TimeOut {str(e)} then try to connect to NASA server in {head_timeout} seconds"
+                log.error(msg)
+                raise RuntimeError(msg)
+            log.debug("get response headers")
             headers = head.headers
             content_type = headers.get('content-type')
             if content_type is not None:
@@ -314,7 +329,15 @@ class omni_downloader(object):
                                        +'content_type is html. Headers were:\n'
                                        +'{}'.format(headers)))
 
-            response = requests.get(url,allow_redirects=True)
+            log.debug("try get response content")
+            get_timeout = 0.75
+            try:
+                response = requests.get(url,allow_redirects=True, timeout=get_timeout)
+            except ReadTimeout as e:
+                msg = f"TimeOut {str(e)} then try to get data from NASA server in {get_timeout} seconds"
+                log.error(msg)
+                raise RuntimeError(msg)
+            log.debug("get response content")
 
             if self.cdf_or_txt == 'txt':
                 try:
@@ -476,21 +499,27 @@ class knippjh(omni_derived_var):
 
 class omni_interval(object):
     def __init__(self,startdt,enddt,cadence,silent=False,cdf_or_txt='cdf',force_download=False):
+        log.debug("omnireader.py:482")
         #Just handles the possiblilty of having a read running between two CDFs
         self.dwnldr = omni_downloader(cdf_or_txt=cdf_or_txt,force_download=force_download)
         self.silent = silent #No messages
         self.cadence = cadence
         self.startdt = startdt
         self.enddt = enddt
+        log.debug("omnireader.py:489")
         self.cdfs = [self.dwnldr.get_cdf(startdt,cadence)]
+        log.debug("omnireader.py:491")
         self.attrs = self.cdfs[-1].attrs #Mirror the global attributes for convenience
         self.transforms = dict() #Functions which transform data automatically on __getitem__
         #Find the index corresponding to the first value larger than startdt
         self.si = np.searchsorted(self.cdfs[0]['Epoch'][:],startdt)
+        log.debug("omnireader.py:496")
         while self.cdfs[-1]['Epoch'][-1] < enddt:
             #Keep adding CDFs until we span the entire range
+            log.debug("omnireader.py:499")
             self.cdfs.append(self.dwnldr.get_cdf(self.cdfs[-1]['Epoch'][-1]+datetime.timedelta(days=1),cadence))
         #Find the first index larger than the enddt in the last CDF
+        log.debug("omnireader.py:502")
         self.ei = np.searchsorted(self.cdfs[-1]['Epoch'][:],enddt)
         if not self.silent:
             print("Created interval between %s and %s, cadence %s, start index %d, end index %d" % (self.startdt.strftime('%Y-%m-%d'),
