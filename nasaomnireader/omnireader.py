@@ -312,7 +312,7 @@ class omni_downloader(object):
             url = 'https://'+self.ftpserv+remotefn
             log.debug(url)
 
-            head_timeout = 0.75
+            head_timeout = 2.75
 
             try:
                 head = requests.head(url,allow_redirects=True, timeout=head_timeout)
@@ -330,7 +330,7 @@ class omni_downloader(object):
                                        +'{}'.format(headers)))
 
             log.debug("try get response content")
-            get_timeout = 0.75
+            get_timeout = 2.75
             try:
                 response = requests.get(url,allow_redirects=True, timeout=get_timeout)
             except ReadTimeout as e:
