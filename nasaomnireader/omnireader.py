@@ -288,7 +288,7 @@ class omni_downloader(object):
         else:
             raise ValueError('Invalid value of cdf_or_txt argument. Valid values are "txt" and "cdf"')
 
-    def get_cdf(self,dt,cadence):
+    def get_cdf(self,dt,cadence, proxy_url=None, proxy_key=None):
         remotefn = self.ftpdir+'/'+self.cadence_subdir[cadence]+'/'+self.filename_gen[cadence](dt)
         remote_path,fn = '/'.join(remotefn.split('/')[:-1]),remotefn.split('/')[-1]
         localfn = os.path.join(self.localdir,fn)
@@ -311,33 +311,33 @@ class omni_downloader(object):
 
             url = 'https://'+self.ftpserv+remotefn
             log.debug(url)
+            response = None
+            if proxy_url is not None and proxy_key is not None:
+                api_key = proxy_key
+                headers = {
+                    "apikey": api_key
+                }
+                params = [("url", url)]
 
-            head_timeout = 2.75
-
-            try:
-                head = requests.head(url,allow_redirects=True, timeout=head_timeout)
-            except ReadTimeout as e:
-                msg = f"TimeOut {str(e)} then try to connect to NASA server in {head_timeout} seconds"
-                log.error(msg)
-                raise RuntimeError(msg)
-            log.debug("get response headers")
-            headers = head.headers
-            content_type = headers.get('content-type')
-            if content_type is not None:
-                if 'html' in content_type.lower():
-                    raise RuntimeError(('Expected {} to be a file, but '.format(url)
-                                       +'content_type is html. Headers were:\n'
-                                       +'{}'.format(headers)))
-
-            log.debug("try get response content")
-            get_timeout = 2.75
-            try:
-                response = requests.get(url,allow_redirects=True, timeout=get_timeout)
-            except ReadTimeout as e:
-                msg = f"TimeOut {str(e)} then try to get data from NASA server in {get_timeout} seconds"
-                log.error(msg)
-                raise RuntimeError(msg)
-            log.debug("get response content")
+                log.debug("try get response content with proxy")
+                get_timeout = 62.75
+                try:
+                    response = requests.get(proxy_url, headers=headers, params=params, timeout=get_timeout)
+                except ReadTimeout as e:
+                    msg = f"TimeOut {str(e)} then try to get data from NASA server in {get_timeout} seconds"
+                    log.error(msg)
+                    raise RuntimeError(msg)
+                log.debug("get response content with proxy")
+            else:
+                log.debug("try get response content without proxy")
+                get_timeout = 12.75
+                try:
+                    response = requests.get(url, timeout=get_timeout)
+                except ReadTimeout as e:
+                    msg = f"TimeOut {str(e)} then try to get data from NASA server in {get_timeout} seconds"
+                    log.error(msg)
+                    raise RuntimeError(msg)
+                log.debug("get response content with proxy")
 
             if self.cdf_or_txt == 'txt':
                 try:
@@ -498,7 +498,7 @@ class knippjh(omni_derived_var):
         return jhindex
 
 class omni_interval(object):
-    def __init__(self,startdt,enddt,cadence,silent=False,cdf_or_txt='cdf',force_download=False):
+    def __init__(self,startdt,enddt,cadence,silent=False,cdf_or_txt='cdf',force_download=False, proxy_url=None, proxy_key=None):
         log.debug("omnireader.py:482")
         #Just handles the possiblilty of having a read running between two CDFs
         self.dwnldr = omni_downloader(cdf_or_txt=cdf_or_txt,force_download=force_download)
@@ -507,7 +507,7 @@ class omni_interval(object):
         self.startdt = startdt
         self.enddt = enddt
         log.debug("omnireader.py:489")
-        self.cdfs = [self.dwnldr.get_cdf(startdt,cadence)]
+        self.cdfs = [self.dwnldr.get_cdf(startdt,cadence, proxy_url=proxy_url, proxy_key=proxy_key)]
         log.debug("omnireader.py:491")
         self.attrs = self.cdfs[-1].attrs #Mirror the global attributes for convenience
         self.transforms = dict() #Functions which transform data automatically on __getitem__
@@ -517,7 +517,7 @@ class omni_interval(object):
         while self.cdfs[-1]['Epoch'][-1] < enddt:
             #Keep adding CDFs until we span the entire range
             log.debug("omnireader.py:499")
-            self.cdfs.append(self.dwnldr.get_cdf(self.cdfs[-1]['Epoch'][-1]+datetime.timedelta(days=1),cadence))
+            self.cdfs.append(self.dwnldr.get_cdf(self.cdfs[-1]['Epoch'][-1]+datetime.timedelta(days=1),cadence, proxy_url=proxy_url, proxy_key=proxy_key))
         #Find the first index larger than the enddt in the last CDF
         log.debug("omnireader.py:502")
         self.ei = np.searchsorted(self.cdfs[-1]['Epoch'][:],enddt)
@@ -603,8 +603,8 @@ class omni_interval(object):
         return str(self.cdfs[0])
 
 class omni_event(object):
-    def __init__(self,startdt,enddt,label=None,cadence='5min',cdf_or_txt='cdf'):
-        self.interval = omni_interval(startdt,enddt,cadence,cdf_or_txt=cdf_or_txt)
+    def __init__(self,startdt,enddt,label=None,cadence='5min',cdf_or_txt='cdf', proxy_url=None, proxy_key=None):
+        self.interval = omni_interval(startdt,enddt,cadence,cdf_or_txt=cdf_or_txt, proxy_url=proxy_url, proxy_key=proxy_key)
         datetime2doy = lambda dt: dt.timetuple().tm_yday + dt.hour/24. + dt.minute/24./60. + dt.second/86400. + dt.microsecond/86400./1e6
         self.doy = special_datetime.datetimearr2doy(self.interval['Epoch'])
         self.jd = special_datetime.datetimearr2jd(self.interval['Epoch'])
@@ -749,7 +749,7 @@ class omni_sea(object):
                 print(ln)
 
 class omni_interval_delay_smooth(object):
-    def __init__(self,startdt,enddt,cadence,delay_mins=10,avg_mins=45):
+    def __init__(self,startdt,enddt,cadence,delay_mins=10,avg_mins=45, proxy_url=None, proxy_key=None):
         """
         Create lagged and smoothed 1-minute omniweb solar wind data
         appropriately for driving CS10
@@ -761,7 +761,7 @@ class omni_interval_delay_smooth(object):
         total_lag = datetime.timedelta(minutes=delay_mins+avg_mins+1)
         delayed_startdt = startdt - total_lag
         self.delayed_startdt = delayed_startdt
-        self.oi = omni_interval(delayed_startdt,enddt,cadence)
+        self.oi = omni_interval(delayed_startdt,enddt,cadence, proxy_url=proxy_url, proxy_key=proxy_key)
         self.dts = self.oi['Epoch']
         self.jds = special_datetime.datetimearr2jd(self.dts).flatten()
 
