@@ -15,7 +15,7 @@ if not os.path.exists(data_dir):
     os.makedirs(data_dir)
 
 config = {
-    'omnireader' : {
-        'local_cdf_dir':data_dir
+    'omnireader': {
+        'local_cdf_dir': data_dir
     }
 }
