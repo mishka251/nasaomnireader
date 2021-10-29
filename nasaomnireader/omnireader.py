@@ -306,9 +306,9 @@ class omni_downloader(object):
         remotefn = self.ftpdir + '/' + self.cadence_subdir[cadence] + '/' + self.filename_gen[cadence](dt)
         remote_path, fn = '/'.join(remotefn.split('/')[:-1]), remotefn.split('/')[-1]
         localfn = os.path.join(self.localdir, fn)
-        log.debug(f"omnireader.py:292, localfn={localfn}, remote={remote_path}")
+        # log.debug(f"omnireader.py:292, localfn={localfn}, remote={remote_path}")
         if not os.path.exists(localfn) or self.force_download:
-            log.debug(f"omnireader.py:294")
+            # log.debug(f"omnireader.py:294")
             # ftp = ftplib.FTP_TLS(self.ftpserv)
             # print('Connecting to OMNIWeb FTP server %s' % (self.ftpserv))
             # ftp.connect()
@@ -324,7 +324,7 @@ class omni_downloader(object):
             # ftp.quit()
 
             url = 'https://' + self.ftpserv + remotefn
-            log.debug(url)
+            # log.debug(url)
             response = None
             if proxy_url is not None and proxy_key is not None:
                 api_key = proxy_key
@@ -333,7 +333,7 @@ class omni_downloader(object):
                 }
                 params = [("url", url)]
 
-                log.debug("try get response content with proxy")
+                # log.debug("try get response content with proxy")
                 get_timeout = 62.75
                 try:
                     response = requests.get(proxy_url, headers=headers, params=params, timeout=get_timeout)
@@ -344,9 +344,9 @@ class omni_downloader(object):
                     msg = f"TimeOut {str(e)} then try to get data from NASA server in {get_timeout} seconds"
                     log.error(msg)
                     raise RuntimeError(msg)
-                log.debug("get response content with proxy")
+                # log.debug("get response content with proxy")
             else:
-                log.debug("try get response content without proxy")
+                # log.debug("try get response content without proxy")
                 get_timeout = 12.75
                 try:
                     response = requests.get(url, timeout=get_timeout)
@@ -355,7 +355,7 @@ class omni_downloader(object):
                     msg = f"TimeOut {str(e)} then try to get data from NASA server in {get_timeout} seconds"
                     log.error(msg)
                     raise RuntimeError(msg)
-                log.debug("get response content with proxy")
+                # log.debug("get response content with proxy")
 
             if self.cdf_or_txt == 'txt':
                 try:
@@ -528,28 +528,28 @@ class knippjh(omni_derived_var):
 class omni_interval(object):
     def __init__(self, startdt, enddt, cadence, silent=False, cdf_or_txt='cdf', force_download=False, proxy_url=None,
                  proxy_key=None):
-        log.debug("omnireader.py:482")
+        # log.debug("omnireader.py:482")
         # Just handles the possiblilty of having a read running between two CDFs
         self.dwnldr = omni_downloader(cdf_or_txt=cdf_or_txt, force_download=force_download)
         self.silent = silent  # No messages
         self.cadence = cadence
         self.startdt = startdt
         self.enddt = enddt
-        log.debug("omnireader.py:489")
+        # log.debug("omnireader.py:489")
         self.cdfs = [self.dwnldr.get_cdf(startdt, cadence, proxy_url=proxy_url, proxy_key=proxy_key)]
-        log.debug("omnireader.py:491")
+        # log.debug("omnireader.py:491")
         self.attrs = self.cdfs[-1].attrs  # Mirror the global attributes for convenience
         self.transforms = dict()  # Functions which transform data automatically on __getitem__
         # Find the index corresponding to the first value larger than startdt
         self.si = np.searchsorted(self.cdfs[0]['Epoch'][:], startdt)
-        log.debug("omnireader.py:496")
+        # log.debug("omnireader.py:496")
         while self.cdfs[-1]['Epoch'][-1] < enddt:
             # Keep adding CDFs until we span the entire range
-            log.debug("omnireader.py:499")
+            # log.debug("omnireader.py:499")
             self.cdfs.append(self.dwnldr.get_cdf(self.cdfs[-1]['Epoch'][-1] + datetime.timedelta(days=1), cadence,
                                                  proxy_url=proxy_url, proxy_key=proxy_key))
         # Find the first index larger than the enddt in the last CDF
-        log.debug("omnireader.py:502")
+        # log.debug("omnireader.py:502")
         self.ei = np.searchsorted(self.cdfs[-1]['Epoch'][:], enddt)
         if not self.silent:
             print("Created interval between %s and %s, cadence %s, start index %d, end index %d" % (
