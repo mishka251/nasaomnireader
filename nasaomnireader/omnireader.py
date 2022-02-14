@@ -11,6 +11,8 @@ import matplotlib.pyplot as pp
 import numpy as np
 import scipy.interpolate as interpolate
 from requests import ReadTimeout
+import re
+import calendar
 
 log = logging.getLogger(__name__)
 
@@ -285,77 +287,125 @@ class omni_downloader(object):
         self.ftpserv = 'spdf.gsfc.nasa.gov'
         self.ftpdir = '/pub/data/omni'
         # Hourly CDF are every six months, 5 minute are every month as are 1 min
-        if self.cdf_or_txt is 'cdf':
+        if self.cdf_or_txt == 'cdf':
             self.cadence_subdir = {'hourly': 'omni_cdaweb/hourly', '5min': 'omni_cdaweb/hro_5min',
                                    '1min': 'omni_cdaweb/hro_1min'}
             self.filename_gen = {'hourly': lambda dt: '%d/omni2_h0_mrg1hr_%d%.2d01_v01.cdf' % (
             dt.year, dt.year, 1 if dt.month < 7 else 7),
                                  '5min': lambda dt: '%d/omni_hro_5min_%d%.2d01_v01.cdf' % (dt.year, dt.year, dt.month),
                                  '1min': lambda dt: '%d/omni_hro_1min_%d%.2d01_v01.cdf' % (dt.year, dt.year, dt.month)}
-        elif self.cdf_or_txt is 'txt':
+            self.filepatterns = {'hourly': '\d{4}', '5min': '\d{4}',
+                                   '1min': '\d{4}'}
+            self.fileformats = {'hourly': '%Y', '5min': '%Y',
+                                 '1min': '%Y'}
+        elif self.cdf_or_txt == 'txt':
             self.cadence_subdir = {'hourly': 'low_res_omni', '5min': 'high_res_omni',
                                    '1min': 'high_res_omni/monthly_1min'}
             self.filename_gen = {'hourly': lambda dt: 'omni2_%d.dat' % (dt.year),
                                  '5min': lambda dt: 'omni_5min%d.asc' % (dt.year),
                                  '1min': lambda dt: 'omni_min%d%.2d.asc' % (dt.year, dt.month)}
+            self.filepatterns = {'hourly': 'omni_m\d*.dat', '5min': 'omni_min\d*.asc',
+                                   '1min': 'omni_min\d*.asc'}
+            self.fileformats = {'hourly': 'omni_m%Y.dat', '5min': 'omni_min%Y%m.asc',
+                                 '1min': 'omni_min%Y%m.asc'}
         else:
             raise ValueError('Invalid value of cdf_or_txt argument. Valid values are "txt" and "cdf"')
 
+    def get_response(self, url, proxy_url, proxy_key):
+        response = None
+        if proxy_url is not None and proxy_key is not None:
+            api_key = proxy_key
+            headers = {
+                "apikey": api_key
+            }
+            params = [("url", url)]
+
+            # log.debug("try get response content with proxy")
+            get_timeout = 62.75
+            try:
+                response = requests.get(proxy_url, headers=headers, params=params, timeout=get_timeout)
+                # print(response.status_code)
+
+                if response.status_code >= 400:
+                    raise RuntimeError(f"Ошибка запроса - ответ пришел с кодом {response.status_code}")
+            except ReadTimeout as e:
+                msg = f"TimeOut {str(e)} then try to get data from NASA server in {get_timeout} seconds"
+                log.error(msg)
+                raise RuntimeError(msg)
+                # log.debug("get response content with proxy")
+
+        else:
+            # log.debug("try get response content without proxy")
+            get_timeout = 12.75
+            try:
+                response = requests.get(url, timeout=get_timeout)
+                # print(response.status_code)
+            except ReadTimeout as e:
+                msg = f"TimeOut {str(e)} then try to get data from NASA server in {get_timeout} seconds"
+                log.error(msg)
+                raise RuntimeError(msg)
+        return response
+
+    def fix_cdf_interval(self, start_dt, end_dt, cadence, proxy_url=None, proxy_key=None):
+        remotefn = self.ftpdir + '/' + self.cadence_subdir[cadence] + '/'
+        url = 'https://' + self.ftpserv + remotefn
+        response = self.get_response(url, proxy_url, proxy_key)
+        tmp = set(re.findall(self.filepatterns[cadence], response.text))
+        tmp2 = [datetime.datetime.strptime(d, self.fileformats[cadence]) for d in tmp]
+
+        min_date = min(tmp2)
+        max_date = max(tmp2)
+
+        max_date += datetime.timedelta(days=calendar.monthrange(max_date.year, max_date.month)[1])
+
+        if start_dt < min_date:
+            delta = min_date - start_dt
+            return (start_dt + delta, end_dt + delta)
+        elif end_dt > max_date:
+            delta = end_dt - max_date + datetime.timedelta(days=1)
+            return (start_dt - delta, end_dt - delta)
+        else:
+            return start_dt, end_dt
+
+    def fix_txt_interval(self, start_dt, end_dt, cadence, proxy_url=None, proxy_key=None):
+        remotefn = self.ftpdir + '/' + self.cadence_subdir[cadence] + '/'
+        url = 'https://' + self.ftpserv + remotefn
+        response = self.get_response(url, proxy_url,proxy_key)
+
+        tmp = set(re.findall(self.filepatterns[cadence], response.text))
+        tmp2 = [datetime.datetime.strptime(d, self.fileformats[cadence]) for d in tmp]
+
+        min_date = min(tmp2)
+        max_date = max(tmp2)
+
+        max_date += datetime.timedelta(days=calendar.monthrange(max_date.year, max_date.month)[1])
+
+        if start_dt < min_date:
+            delta = min_date - start_dt
+            return (start_dt + delta, end_dt + delta)
+        elif end_dt > max_date:
+            delta = end_dt - max_date + datetime.timedelta(days=1)
+            return (start_dt - delta, end_dt - delta)
+        else:
+            return start_dt, end_dt
+
+    def fix_interval(self, start_dt, end_dt, cadence, proxy_url=None, proxy_key=None):
+        if self.cdf_or_txt == 'cdf':
+            return self.fix_cdf_interval(start_dt, end_dt, cadence, proxy_url, proxy_key)
+        else:
+            return self.fix_txt_interval(start_dt, end_dt, cadence, proxy_url, proxy_key)
+
+
     def get_cdf(self, dt, cadence, proxy_url=None, proxy_key=None):
-        print(f"{cadence=}, {dt=}")
+        # print(f"{cadence=}, {dt=}")
         remotefn = self.ftpdir + '/' + self.cadence_subdir[cadence] + '/' + self.filename_gen[cadence](dt)
         remote_path, fn = '/'.join(remotefn.split('/')[:-1]), remotefn.split('/')[-1]
         localfn = os.path.join(self.localdir, fn)
         # log.debug(f"omnireader.py:292, localfn={localfn}, remote={remote_path}")
         if not os.path.exists(localfn) or self.force_download:
-            # log.debug(f"omnireader.py:294")
-            # ftp = ftplib.FTP_TLS(self.ftpserv)
-            # print('Connecting to OMNIWeb FTP server %s' % (self.ftpserv))
-            # ftp.connect()
-            # ftp.login()
-            # ftp.prot_p() #switch to secure data connection
-
-            # #Change directory
-            # ftp.cwd(remote_path)
-            # print('Downloading file %s' % (remote_path+'/'+fn))
-            # with open(localfn,'wb') as f:
-            #     ftp.retrbinary('RETR ' + fn, f.write)
-            # print("Saved as %s" % (localfn))
-            # ftp.quit()
-
             url = 'https://' + self.ftpserv + remotefn
             # log.debug(url)
-            response = None
-            if proxy_url is not None and proxy_key is not None:
-                api_key = proxy_key
-                headers = {
-                    "apikey": api_key
-                }
-                params = [("url", url)]
-
-                # log.debug("try get response content with proxy")
-                get_timeout = 62.75
-                try:
-                    response = requests.get(proxy_url, headers=headers, params=params, timeout=get_timeout)
-                    print(response.status_code)
-                    if response.status_code >= 400:
-                        raise RuntimeError(f"Ошибка запроса - ответ пришел с кодом {response.status_code}")
-                except ReadTimeout as e:
-                    msg = f"TimeOut {str(e)} then try to get data from NASA server in {get_timeout} seconds"
-                    log.error(msg)
-                    raise RuntimeError(msg)
-                # log.debug("get response content with proxy")
-            else:
-                # log.debug("try get response content without proxy")
-                get_timeout = 12.75
-                try:
-                    response = requests.get(url, timeout=get_timeout)
-                    print(response.status_code)
-                except ReadTimeout as e:
-                    msg = f"TimeOut {str(e)} then try to get data from NASA server in {get_timeout} seconds"
-                    log.error(msg)
-                    raise RuntimeError(msg)
-                # log.debug("get response content with proxy")
+            response = response = self.get_response(url, proxy_url, proxy_key)
 
             if self.cdf_or_txt == 'txt':
                 try:
@@ -536,21 +586,25 @@ class omni_interval(object):
         self.startdt = startdt
         self.enddt = enddt
         # log.debug("omnireader.py:489")
-        self.cdfs = [self.dwnldr.get_cdf(startdt, cadence, proxy_url=proxy_url, proxy_key=proxy_key)]
+
+        self.startdt, self.enddt = self.dwnldr.fix_interval(self.startdt,self.enddt, cadence, proxy_url=proxy_url, proxy_key=proxy_key)
+
+        self.cdfs = [self.dwnldr.get_cdf(self.startdt, cadence, proxy_url=proxy_url, proxy_key=proxy_key)]
         # log.debug("omnireader.py:491")
         self.attrs = self.cdfs[-1].attrs  # Mirror the global attributes for convenience
         self.transforms = dict()  # Functions which transform data automatically on __getitem__
         # Find the index corresponding to the first value larger than startdt
-        self.si = np.searchsorted(self.cdfs[0]['Epoch'][:], startdt)
+        self.si = np.searchsorted(self.cdfs[0]['Epoch'][:], self.startdt)
         # log.debug("omnireader.py:496")
-        while self.cdfs[-1]['Epoch'][-1] < enddt:
+        while self.cdfs[-1]['Epoch'][-1] < self.enddt:
             # Keep adding CDFs until we span the entire range
             # log.debug("omnireader.py:499")
             self.cdfs.append(self.dwnldr.get_cdf(self.cdfs[-1]['Epoch'][-1] + datetime.timedelta(days=1), cadence,
                                                  proxy_url=proxy_url, proxy_key=proxy_key))
         # Find the first index larger than the enddt in the last CDF
         # log.debug("omnireader.py:502")
-        self.ei = np.searchsorted(self.cdfs[-1]['Epoch'][:], enddt)
+        self.ei = np.searchsorted(self.cdfs[-1]['Epoch'][:], self.enddt)
+
         if not self.silent:
             print("Created interval between %s and %s, cadence %s, start index %d, end index %d" % (
             self.startdt.strftime('%Y-%m-%d'),
@@ -563,9 +617,86 @@ class omni_interval(object):
         self.computed['newell'] = newell(self)
         self.computed['knippjh'] = knippjh(self)
 
+        _vars = [
+            'BX_GSE',
+            'BY_GSM',
+            'BZ_GSM',
+        ]
+
+        nan_var = None
+
+        for var in _vars:
+            values = self[var]
+            if any([np.isnan(val) for val in  values]):
+                nan_var = var
+                break
+
+        if nan_var is not None:
+            if len(self.cdfs) == 1:
+                fill = self.cdfs[-1][nan_var].attrs['FILLVAL']
+                int_len = self.ei - self.si
+                values = self.cdfs[0][nan_var][:]
+                is_nan = np.isnan(values)
+
+                ei = self.ei
+                while is_nan[ei] and ei>0:
+                    ei-=1
+
+                if ei< int_len:
+                    timespan = self.enddt - self.startdt
+
+                    self.enddt = self.cdfs[0]['Epoch'][0] - datetime.timedelta(days=2)
+                    self.startdt = self.enddt - timespan
+
+                    dwnldr = omni_downloader(cdf_or_txt=cdf_or_txt, force_download=True)
+
+                    self.cdfs = [dwnldr.get_cdf(self.startdt, cadence, proxy_url=proxy_url, proxy_key=proxy_key)]
+                    # log.debug("omnireader.py:491")
+                    self.attrs = self.cdfs[-1].attrs  # Mirror the global attributes for convenience
+                    self.transforms = dict()  # Functions which transform data automatically on __getitem__
+                    # Find the index corresponding to the first value larger than startdt
+                    self.si = np.searchsorted(self.cdfs[0]['Epoch'][:], self.startdt)
+                    # log.debug("omnireader.py:496")
+                    while self.cdfs[-1]['Epoch'][-1] < self.enddt:
+                        # Keep adding CDFs until we span the entire range
+                        # log.debug("omnireader.py:499")
+                        self.cdfs.append(
+                            self.dwnldr.get_cdf(self.cdfs[-1]['Epoch'][-1] + datetime.timedelta(days=1), cadence,
+                                                proxy_url=proxy_url, proxy_key=proxy_key))
+                    # Find the first index larger than the enddt in the last CDF
+                    # log.debug("omnireader.py:502")
+                    self.ei = np.searchsorted(self.cdfs[-1]['Epoch'][:], self.enddt)
+
+                    if not self.silent:
+                        print("Created interval between %s and %s, cadence %s, start index %d, end index %d" % (
+                            self.startdt.strftime('%Y-%m-%d'),
+                            self.enddt.strftime('%Y-%m-%d'), self.cadence, self.si, self.ei))
+                    self.add_transform('KP', ['hourly'], lambda x: x / 10., 'Hourly Kp*10 -> Kp')
+                    # Implement computed variables
+                    self.computed = dict()
+                    self.computed['juliandate'] = juliandate(self)
+                    self.computed['borovsky'] = borovsky(self)
+                    self.computed['newell'] = newell(self)
+                    self.computed['knippjh'] = knippjh(self)
+
+                else:
+                    si = ei-int_len
+
+                    self.si = si
+                    self.ei = ei
+
+                    self.startdt = self.cdfs[0]['Epoch'][self.si]
+                    self.enddt = self.cdfs[0]['Epoch'][self.ei]
+
+                    self.computed['juliandate'] = juliandate(self)
+                    self.computed['borovsky'] = borovsky(self)
+                    self.computed['newell'] = newell(self)
+                    self.computed['knippjh'] = knippjh(self)
+
     def get_var_attr(self, var, att):
         """Get a variable attribute"""
         if var in self.computed:
+            # print(f'1 {var}, {att}, {self.computed[var].attrs[att]}')
             return self.computed[var].attrs[att]
         elif att in self.cdfs[-1][var].attrs:
             return self.cdfs[-1][var].attrs[att]
@@ -576,8 +707,9 @@ class omni_interval(object):
         # If it's a derived variable go get it
         # with it's own __call__ method
         if cdfvar in self.computed:
+            # print('1')
             return self.computed[cdfvar]()
-
+        # print(self.cdfs)
         # Attempt the getitem on all the cdfs in order
         if len(self.cdfs) > 1:
             ret = []
@@ -609,6 +741,7 @@ class omni_interval(object):
                 # print "Data before", data
                 data = transform['fcn'](data)
                 # print "Data after", data
+        # print('2')
         return data
 
     def add_transform(self, cdfvar, cadences, fcn, desc):
@@ -631,7 +764,7 @@ class omni_interval(object):
         self.transforms[cdfvar] = {'cadences': cadences, 'fcn': fcn, 'desc': desc}
 
     def __str__(self):
-        return str(self.cdfs[0])
+        return 'oi '+str(self.cdfs[0])
 
 
 class omni_event(object):
@@ -781,11 +914,11 @@ class omni_sea(object):
 
         with open(os.path.join(csvdir, csvfn), 'w') as f:
             f.write(header)
-            print(header)
+            # print(header)
             for i in range(len(t.flatten())):
                 ln = '%.5f,%e,%e,%e\n' % (t[i], y_lq[i], y_med[i], y_uq[i])
                 f.write(ln)
-                print(ln)
+                # print(ln)
 
 
 class omni_interval_delay_smooth(object):
