@@ -1,5 +1,6 @@
 # (C) 2020 University of Colorado AES-CCAR-SEDA (Space Environment Data Analysis) Group
 # Written by Liam M. Kilcommons
+import nasaomnireader.omni_interval
 from nasaomnireader import omnireader
 import pytest
 import numpy as np
@@ -16,7 +17,7 @@ def example_omni_interval(request):
     """
     cadence = request.param
     dt = datetime.datetime(2006,3,14)
-    return omnireader.omni_interval(dt,dt+datetime.timedelta(days=1),cadence)
+    return nasaomnireader.omni_interval.omni_interval(dt, dt + datetime.timedelta(days=1), cadence)
 
 def test_omnireader_can_download_txt():
     """
@@ -44,13 +45,13 @@ def omni_interval_txtcdf_comparison(request):
     dt = datetime.datetime(2006,3,14)
     omni_interval_args = (dt,dt+datetime.timedelta(days=1),cadence)
     oiformats = {
-                'cdf':omnireader.omni_interval(*omni_interval_args,
-                                                    cdf_or_txt='cdf',
-                                                    force_download=True),
+                'cdf': nasaomnireader.omni_interval.omni_interval(*omni_interval_args,
+                                                                  cdf_or_txt='cdf',
+                                                                  force_download=True),
 
-                'txt':omnireader.omni_interval(*omni_interval_args,
-                                                    cdf_or_txt='txt',
-                                                    force_download=True)
+                'txt': nasaomnireader.omni_interval.omni_interval(*omni_interval_args,
+                                                                  cdf_or_txt='txt',
+                                                                  force_download=True)
                 }
     return oiformats
 
