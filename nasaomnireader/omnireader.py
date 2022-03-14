@@ -174,6 +174,13 @@ class omni_downloader(object):
                 '5min': lambda dt: '%d/omni_hro_5min_%d%.2d01_v01.cdf' % (dt.year, dt.year, dt.month),
                 '1min': lambda dt: '%d/omni_hro_1min_%d%.2d01_v01.cdf' % (dt.year, dt.year, dt.month)
             }
+
+            self.filename_gen_yd = {
+                'hourly': lambda dt: 'omni2_h0_mrg1hr_%d%.2d01_v01.cdf' % (dt.year, 1 if dt.month < 7 else 7),
+                '5min': lambda dt: 'omni_hro_5min_%d%.2d01_v01.cdf' % (dt.year, dt.month),
+                '1min': lambda dt: 'omni_hro_1min_%d%.2d01_v01.cdf' % (dt.year, dt.month)
+            }
+
             self.filepatterns = {
                 'hourly': '\d{4}',
                 '5min': '\d{4}',
@@ -183,6 +190,18 @@ class omni_downloader(object):
                 'hourly': '%Y',
                 '5min': '%Y',
                 '1min': '%Y'
+            }
+
+            self.filepatterns_yd = {
+                'hourly': 'omni2_h0_mrg1hr_\d*01_v01.cdf',
+                '5min': 'omni_hro_5min_\d*01_v01.cdf',
+                '1min': 'omni_hro_1min_\d*01_v01.cdf'
+            }
+
+            self.fileformats_yd = {
+                'hourly': 'omni2_h0_mrg1hr_%Y%m01_v01.cdf',
+                '5min': 'omni_hro_5min_%Y%m01_v01.cdf',
+                '1min': 'omni_hro_1min_%Y%m01_v01.cdf'
             }
         elif self.cdf_or_txt == 'txt':
             self.cadence_subdir = {
@@ -195,6 +214,8 @@ class omni_downloader(object):
                 '5min': lambda dt: 'omni_5min%d.asc' % (dt.year),
                 '1min': lambda dt: 'omni_min%d%.2d.asc' % (dt.year, dt.month)
             }
+
+            self.filename_gen_yd=self.filename_gen
 
             self.filepatterns = {
                 'hourly': 'omni_m\d*.dat',
@@ -238,7 +259,7 @@ class omni_downloader(object):
                 # print(response.status_code)
 
                 if response.status_code >= 400:
-                    raise RuntimeError(f"Ошибка запроса - ответ пришел с кодом {response.status_code}")
+                    raise RuntimeError(f"Ошибка запроса - ответ пришел с кодом {response.status_code}. {response.content}")
             except ReadTimeout as e:
                 msg = f"TimeOut {str(e)} then try to get data from NASA server in {get_timeout} seconds"
                 log.error(msg)
@@ -247,7 +268,7 @@ class omni_downloader(object):
 
         else:
             # log.debug("try get response content without proxy")
-            get_timeout = 12.75
+            get_timeout = 32.75
             try:
                 response = requests.get(url, timeout=get_timeout)
                 # print(response.status_code)
@@ -322,7 +343,7 @@ class omni_downloader(object):
     def get_cdf_from_ya_disk(self, dt, cadence, **kwargs):
         y = yadisk.YaDisk(token=self.yd_token)
         yadisk_base_dir = self.yd_dir
-        fn = self.filename_gen[cadence](dt)
+        fn = self.filename_gen_yd[cadence](dt)
         remotefn = yadisk_base_dir + '/' + fn
         localfn = os.path.join(self.localdir, fn)
         # log.debug(f"omnireader.py:292, localfn={localfn}, remote={remote_path}")
@@ -334,6 +355,25 @@ class omni_downloader(object):
         elif self.cdf_or_txt == 'cdf':
             return pycdf.CDF(localfn)
 
+    def load_from_nasa_to_yadisk(self, dt, cadence, proxy_url, proxy_key):
+        y = yadisk.YaDisk(token=self.yd_token)
+        fn = self.filename_gen[cadence](dt)
+        fn_yd = self.filename_gen_yd[cadence](dt)
+        print(fn)
+        remotefn = self.ftpdir + '/' + self.cadence_subdir[cadence] + '/' + fn
+        yd_remotefn = self.yd_dir + '/' + fn_yd
+        url = 'https://' + self.ftpserv + remotefn
+        # log.debug(url)
+        response = self.get_response(url, proxy_url, proxy_key)
+        print(response.status_code)
+        if response.status_code>=400:
+            return
+
+        localfn = 'ya_disk_download_tmp'
+
+        with open(localfn, 'wb') as f:
+            f.write(response.content)
+        y.upload(localfn, yd_remotefn, overwrite=True, timeout=60.0)
 
 if __name__ == '__main__':
     pass
