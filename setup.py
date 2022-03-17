@@ -11,7 +11,7 @@ from setuptools import setup
 from setuptools.command import install as _install
 
 setup(name='nasaomnireader',
-      version = "0.1.5",
+      version = "0.1.6",
       description = "Tools for using heliophysics parameters from NASA OMNIWeb",
       author = "Liam Kilcommons",
       author_email = 'liam.kilcommons@colorado.edu',
