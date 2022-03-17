@@ -148,6 +148,9 @@ from nasaomnireader import config
 localdir = config['omnireader']['local_cdf_dir']
 
 
+class ToManyRequestsError(RuntimeError):
+    ...
+
 
 class omni_downloader(object):
     def __init__(self, yd_token, yd_dir, cdf_or_txt='cdf', force_download=False):
@@ -159,7 +162,6 @@ class omni_downloader(object):
 
         self.yd_token = yd_token
         self.yd_dir = yd_dir
-
 
         # Hourly CDF are every six months, 5 minute are every month as are 1 min
         if self.cdf_or_txt == 'cdf':
@@ -215,7 +217,7 @@ class omni_downloader(object):
                 '1min': lambda dt: 'omni_min%d%.2d.asc' % (dt.year, dt.month)
             }
 
-            self.filename_gen_yd=self.filename_gen
+            self.filename_gen_yd = self.filename_gen
 
             self.filepatterns = {
                 'hourly': 'omni_m\d*.dat',
@@ -259,7 +261,10 @@ class omni_downloader(object):
                 # print(response.status_code)
 
                 if response.status_code >= 400:
-                    raise RuntimeError(f"Ошибка запроса - ответ пришел с кодом {response.status_code}. {response.content}")
+                    if response.status_code == 429:
+                        raise ToManyRequestsError('Слишком много запросов к proxy')
+                    raise RuntimeError(
+                        f"{url} Ошибка запроса - ответ пришел с кодом {response.status_code}. {response.content}")
             except ReadTimeout as e:
                 msg = f"TimeOut {str(e)} then try to get data from NASA server in {get_timeout} seconds"
                 log.error(msg)
@@ -359,14 +364,19 @@ class omni_downloader(object):
         y = yadisk.YaDisk(token=self.yd_token)
         fn = self.filename_gen[cadence](dt)
         fn_yd = self.filename_gen_yd[cadence](dt)
-        print(fn)
+        log.debug(fn)
         remotefn = self.ftpdir + '/' + self.cadence_subdir[cadence] + '/' + fn
         yd_remotefn = self.yd_dir + '/' + fn_yd
         url = 'https://' + self.ftpserv + remotefn
         # log.debug(url)
-        response = self.get_response(url, proxy_url, proxy_key)
-        print(response.status_code)
-        if response.status_code>=400:
+        try:
+            response = self.get_response(url, proxy_url, proxy_key)
+        except RuntimeError as ex:
+            log.error(f'skip {str(ex)}')
+            return
+        log.debug(response.status_code)
+        if response.status_code >= 400:
+            log.error(f'skip {response.status_code}')
             return
 
         localfn = 'ya_disk_download_tmp'
@@ -374,6 +384,7 @@ class omni_downloader(object):
         with open(localfn, 'wb') as f:
             f.write(response.content)
         y.upload(localfn, yd_remotefn, overwrite=True, timeout=60.0)
+
 
 if __name__ == '__main__':
     pass
